@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubia-manual-v2
+  labels:
+    creation_method: manual
+    env: prod
+  namespace: first-namespace
+spec:
+  nodeSelector:
+    gpu: "true"
+  imagePullSecrets:
+    - name: dockerhub-secret
+  containers:
+    - name: kubia
+      image: anhhieu623/kubia:amd64
+      ports:
+        - containerPort: 8080
+          protocol: TCP

@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubia-clusteripsvc
+spec:
+  sessionAffinity: ClientIP
+  type: ClusterIP
+  selector:
+    app: kubia-clusterpod
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP

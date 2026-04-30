@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubia
+spec:
+  ingressClassName: webapprouting.kubernetes.azure.com
+  rules:
+  - host: kubia.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: kubia
+            port:
+              number: 80
+      - path: /nodejs
+        pathType: Prefix
+        backend:
+          service:
+            name: kubia-clusteripsvc
+            port:
+              number: 80

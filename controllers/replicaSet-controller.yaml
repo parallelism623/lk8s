@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: kubia-replicasset
+spec:
+  replicas: 3
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - kubia-clusterpod
+  template:
+    metadata:
+      labels:
+        app: kubia-clusterpod
+    spec:
+      imagePullSecrets:
+      - name: dockerhub-secret
+      containers:
+      - name: kubia
+        image: anhhieu623/kubia:amd64
+        ports:
+        - containerPort: 8080
