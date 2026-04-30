@@ -1,34 +1,62 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8" />
-  <title>K8s Demo</title>
+  <meta charset="UTF-8">
+  <title>K8s Live Demo</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      background: #f4f6f8;
-      text-align: center;
-      padding-top: 100px;
-    }
-
-    .card {
-      background: white;
-      display: inline-block;
+      font-family: monospace;
+      background: #0d1117;
+      color: #00ff9c;
       padding: 40px;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
     }
 
-    h1 {
-      color: #2563eb;
+    .terminal {
+      border: 2px solid #00ff9c;
+      padding: 20px;
+      border-radius: 10px;
+      max-width: 600px;
+      margin: auto;
+      background: #010409;
+    }
+
+    .line {
+      margin: 8px 0;
+    }
+
+    .blink {
+      animation: blink 1s infinite;
+    }
+
+    @keyframes blink {
+      50% { opacity: 0; }
     }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Hello Kubernetes 🚀</h1>
-    <p>Trang HTML demo đang chạy trong Pod.</p>
-    <p>Served by Nginx container.</p>
+  <div class="terminal">
+    <div class="line">> kubectl get pods</div>
+    <div class="line">NAME       STATUS    READY</div>
+    <div class="line">fortune    Running   2/2</div>
+    <br/>
+    <div class="line">> system status:</div>
+    <div class="line">✔ Kubernetes Pod is ACTIVE</div>
+    <div class="line">✔ Nginx is SERVING</div>
+    <div class="line">✔ Volume mounted SUCCESS</div>
+    <br/>
+    <div class="line">> current time:</div>
+    <div class="line" id="time"></div>
+    <br/>
+    <div class="line blink">_</div>
   </div>
+
+  <script>
+    function updateTime() {
+      const now = new Date();
+      document.getElementById("time").innerText = now.toLocaleString();
+    }
+    setInterval(updateTime, 1000);
+    updateTime();
+  </script>
 </body>
 </html>
