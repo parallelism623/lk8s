@@ -509,6 +509,167 @@ Khi không connect được với services nên check theo logic:
 <details>
 <summary>Volumes</summary>
 
-<!-- bạn paste nội dung vào đây -->
+Volumne trong k8s là một thành phân của pod, life-cycle của nó là life-cycle của pod. Volumne cho phép các container chia sẻ chung một filesystem, nhờ mount function của Linux filesystem, các container có thể truy cập vào cùng một folder để share data. 
 
+Các volumnes được tính toán trước khi các container start
+
+### Volumne types
+
+Các loại volumne hiện tại trong k8s:
+
+- emptyDir: empty directory trong pods, thường sử dụng để lưu transient data, life cycle là pod life cycle.
+    
+    ```yaml
+    apiVersion:
+    kind: Pod
+    metadata:
+    	name: -...
+    spec:
+    	containers:
+    		- images:
+    			port:
+    			volumeMounts:
+    			- name:
+    				mountPath
+    	volumes:
+    		- name: 
+    			[type]: 
+    			emptyDir: {}
+    ```
+    
+- hostPath: directory trong worker node’s filesystem
+- gitRepo: giống empty dir tuy nhiên dáta được pull từ git repos về thay vì một empty dir
+    
+    ```yaml
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: fortune
+    spec:
+      containers:
+        - name: web-server
+          image: nginx:alpine
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html
+              readOnly: true
+          ports:
+            - containerPort: 80
+              protocol: TCP
+      volumes:
+        - name: html
+          emptyDir: {}
+    
+      initContainers:
+        - name: git-clone
+          image: alpine/git
+          volumeMounts:
+            - name: html
+              mountPath: /html
+    ```
+    
+- nfs: network file system
+- các persistent cloud provider storage.
+- configMap, secret.
+- các loại network storage khác.
+
+### Decoupling pods from underlying storage technoly
+
+Với cách khai báo các volumnes cụ thể, yêu cầu user phải biết về các loại network storage, điều này đi ngược với ý tưởng của k8s là tách biệt user khỏi infas. Vì vậy để giải quyết thì k8s cung cấp hai loại resource là:
+
+- PersistentVolume: Thường do quản trị hệ thống dùng để tạo các loại volume có sẵn, PV được bind với một storage đã được tạo sẵn từ trước. Storage có thể nằm ngoài clustter. PV thì là resource có coped là cluster-level.
+- PersistentVolumeClaim: PVC là resource cho phép user sử dụng để khai báo tiêu chí storage mà họ cần như: size, các quyền truy cập và thực thi… PVC sau khi được submit, API server sẽ tìm PV tương ứng và mount pods vào storage bên dưới PV đó.
+
+### Create PersistentVolume
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongodb-pv
+spec:
+  capacity:
+    storage: 2Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain   
+  storageClassName: ""                  
+  csi:
+    driver: disk.csi.azure.com
+    volumeHandle: ""
+    fsType: ext4
+```
+
+Khi tạo PV thì người quản trị cần khai báo một số thông tin:
+
+- capacity: size mong muốn, nó phải bé hơn hoặc bằng size của underlying storage
+- accessModes: quyền thực thi cho phép khi sử dụng PV này
+    - RWO: ReadWriteOnce - chỉ cho phép một node có thể mount vào volume để đọc và ghi
+    - ROX: ReadOnlyMany - cho phép nhiều node mount đồng thời để đọc
+    - RWX: ReadWriteMany - nhiều nodes có thể đọc và ghi
+- persistentVolumeReclaimPolicy: PV sẽ như nào khi PVC đang mount với nó bị gỡ xuống (Delete)
+    
+    Khi chưa có PVC nào mount thì PV sẽ có status là Available. Khi có một PVC đang mount thì Status của PV sẽ là Mount, PV chỉ cho phép một PVC mount với nó tại một thời điểm. Sau khi PVC bị gỡ dựa vào persistentVolumeReclaimPolicy PV sẽ:
+    
+    Retain: PV vẫn tồn tại nhưng status sẽ là Released. PV sau đó sẽ k mount được với PVC khác nữa. Cần có các cơ chế recycle hợp lí (manual hoặc auto)
+    
+    Delete: Underlying storage và PV sẽ bị xoá khi PVC mount với nó bị gỡ
+    
+
+### Create PersistentVolumeClaim
+
+Khi user cần sử mount vào các underlying storage thì càn tạo PVC, bằng cách khai báo resource mong muốn, việc chọn resource phù hợp là trách nhiệm của Control plane. PVC là resouces namespace-scoped. Mỗi PVC tuỳ vào access mode, cho phép một hoặc nhiều nodes mount tới nó
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc
+spec:
+  volumeName: mongodb-pv
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+```
+
+Để tạo PVC cần một số thông tin: 
+
+- volumeName: chỉ định PV cụ thể, với options này thì gọi là static provision, pv cố định.
+- resources: các resource yêu cầu, thường bé hơn hoặc bằng provision đang có.
+- storageClassName: trường hợp mong muốn chỉ định Dynamic provision có tên tương ứng. Provision này sau đó tạo PV dựa trên yêu cầu của PVC.
+    
+    
+
+### Dynamic Provisioning
+
+Thay vì ngời quản trị phải tạo trước một tập hợp các PV, người quản trị có thể để cho PV provisioner thực hiện tạo PV mỗi khi nó được yêu cầu. 
+
+Để làm được điều đó trước tiên cần triển khai các PV provisioner lên cluster. Sau đó người quản trị cần tạo các StorageClass resource, resource này sẽ tham chiếu tới provisioner tương ứng. Khi cần user tạo PVC tham chiếu tới StorageClass tương ứng, thông qua giá trị gán cho storageClassName là tên của StorageClass tương ứng. 
+
+Các k8s service trên các cloud provider thường có sẵn các provisioner. 
+
+![image.png](attachment:d0e9c5ec-0897-4f8e-87ab-ab61ca5e5c77:image.png)
+
+StorageClass resource là cluster-scoped resource vì vậy các pods trên các namespace khác nhau có thể reference tới nó, mỗi khi PVC yêu cầu StorageClassResource sẽ tạo ra một PV mới.
+
+### Using a PersistentVolumeClaim in a pod
+
+Để sử dụng PVC trong một pods, trong pods yaml file sử dụng:
+
+```yaml
+  volumes:
+    - name: 
+      persistentVolumeClaim:
+        claimName: 
+```
+
+### Benefits of using PV and PVC
+
+Sử dụng PV và PVC cho phép tách biệt được vai trò trong phát triển, quản trị mạng sẽ đóng vai trò thiết kế các PV và quản lí các underlying Storage hoặc triển khai một dynamic provision với deploy provisioner tạo các StorageClass tương ứng. Các developer chịu trách nhiệm khai báo resource thích hợp cho các app chạy trên các Pods bằng PVC. 
+
+Việc lựa chọn resource thông qua một kiểu syntax (yaml file) cho phép tái sử dụng cùng loại resource khi chuyển qua các cluster khác mà không phải phụ thuộc vào phần cứng bên dưới (hoặc cần thay đổi 1 chút do cloud provdier cung cấp các loại provision khác nhau).
+![image.png](/images/volume-flow.png)
 </details>
