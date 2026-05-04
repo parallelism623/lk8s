@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fortune-config
+data:
+  APP_MODE: dev
+  LOG_LEVEL: debug
+  SLEEP_INTERVAL: "3"
