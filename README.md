@@ -824,3 +824,83 @@ Giống như ConfigMaps hỗ trợ lưu trữ các sensitive configuration nhờ
 
 Tạo và sử dụng Secret giống với config map tuy nhiên cần thay đổi một số syntax liên quan đến việc chon resource.
 </details>
+
+<details>
+<summary>Metadata, Connect API Server</summary>
+### Using Metadata in Pods Yaml Define
+
+Ngoài các Env variables mô tả thông tin của các services trên cluster khi pods được tạo ra, K8s cho phép define một số env variables là các metadatas của pods và container trong cùng pods trực tiếp, hoặc thông qua Kubernetes Downward API, downward API cho phép lấy các thông tin:
+
+- pod name, pod ip, pod labels, pod annotation
+- namespace
+- node name
+- serviceaccount name ( sử dụng để authen khi call tới API server)
+- cpu, memory request/limit
+
+Để sử dụng các metadata trên có thể khai báo trực tiếp trong container.env hoặc sử dụng downward volume.
+
+```yaml
+# Khai báo trong env
+env:
+ - name: POD_NAME
+	 valueFrom: 
+		 fieldRef: 
+			 fieldPath: metadata.name 
+ - name: POD_NAMESPACE
+	 valueFrom:
+		 fieldRef:
+			 fieldPath: metadata.namespace
+ - name: POD_IP
+	 valueFrom:
+		 fieldRef:
+			 fieldPath: status.podIP
+ - name: NODE_NAME
+	 valueFrom:
+		 fieldRef:
+		 fieldPath: spec.nodeName
+ - name: SERVICE_ACCOUNT
+	 valueFrom:
+		 fieldRef:
+			 fieldPath: spec.serviceAccountName
+ - name: CONTAINER_CPU_REQUEST_MILLICORES
+	 valueFrom: 
+		 resourceFieldRef: 
+			 resource: requests.cpu 
+			 divisor: 1m 
+ - name: CONTAINER_MEMORY_LIMIT_KIBIBYTES
+	 valueFrom:
+		 resourceFieldRef:
+			 resource: limits.memory
+			 divisor: 1Ki
+			 
+			 
+			 
+# sử dụng Downward Volume
+volumes:
+ - name: downward 
+	 downwardAPI: 
+		 items:
+		 - path: "podName" 
+				 fieldRef: 
+					 fieldPath: metadata.name 
+		 - path: "containerCpuRequestMilliCores"
+				 resourceFieldRef:
+					 containerName: main
+					 resource: requests.cpu
+					 divisor: 1m
+```
+
+Sử dụng volume cho phép updated data realtime khi các metadata thay đổi như labels hoặc annotations.
+
+### Connect Kubernetes API server
+
+Để sử dụng k8s api server từ local machine sử dụng kubectl proxy, cho phép connect tới một proxy server, nó sẽ chịu trách nhiệm authen và verify API server.
+
+Có thể connect tới API server từ bên trong các container đang chạy dựa vào thư mục /var/run/secrets/kubernetes.io/serviceaccount, nó có chứa các file cần thiết
+
+- token: để authentication với api server
+- ca.crt: dùng để verify server, cert này đã được kí chữ kí số để xác minh api server.
+- namespace: current namespace của pods.
+
+Có thể connection và verify trực tiếp trong container, hoặc sử dụng một container phụ đóng vai trò là proxy, hoặc sử dụng client libraries.
+</details>

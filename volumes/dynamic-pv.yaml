@@ -4,7 +4,7 @@ metadata:
   name: managed-csi-retain
 provisioner: disk.csi.azure.com
 parameters:
-  skuName: Standard_LRS     # hoặc Premium_LRS
-reclaimPolicy: Retain       # 🔥 giữ disk khi xóa PVC
+  skuName: Standard_LRS     
+reclaimPolicy: Retain    
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
