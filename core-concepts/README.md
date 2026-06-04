@@ -827,7 +827,7 @@ Tạo và sử dụng Secret giống với config map tuy nhiên cần thay đ�
 
 <details>
 <summary>Metadata, Connect API Server</summary>
-### Using Metadata in Pods Yaml Define
+Using Metadata in Pods Yaml Define
 
 Ngoài các Env variables mô tả thông tin của các services trên cluster khi pods được tạo ra, K8s cho phép define một số env variables là các metadatas của pods và container trong cùng pods trực tiếp, hoặc thông qua Kubernetes Downward API, downward API cho phép lấy các thông tin:
 
@@ -892,7 +892,7 @@ volumes:
 
 Sử dụng volume cho phép updated data realtime khi các metadata thay đổi như labels hoặc annotations.
 
-### Connect Kubernetes API server
+Connect Kubernetes API server
 
 Để sử dụng k8s api server từ local machine sử dụng kubectl proxy, cho phép connect tới một proxy server, nó sẽ chịu trách nhiệm authen và verify API server.
 
@@ -904,3 +904,117 @@ Có thể connect tới API server từ bên trong các container đang chạy d
 
 Có thể connection và verify trực tiếp trong container, hoặc sử dụng một container phụ đóng vai trò là proxy, hoặc sử dụng client libraries.
 </details>
+
+<details>
+
+<summary>Internal</summary>
+Architecture
+Trong k8s cluster gồm:
+Master node:
+etcd: lưu các config, data objects
+control manager: quản lí và điều phối resources
+scheduler: schedule resources theo trạng thái mong muốn
+api server: orchestrator của cluster, các components kết nối tới API server và giao tiếp cũng thông quan api server
+Worker nodes:
+kube-proxy
+kubelet
+container runtime
+Các components trên một worker nodes thì yêu cầu chạy trên cùng một worker node và thuộc về worker nodes đó. Tuy nhiên các thành phần của master nodes thì có thể deploy nhiều instances chạy trên nhiều nodes, tuy nhiên chỉ có etcd instances được truy cập cùng một thời điểm, scheduler và controller-manager thì chỉ có thể truy cập một instances tại cùng một thời điểm, các instances khác cùng loại ở trạng thái chờ.
+Khi node khởi động, container runtime và kubelet sẽ chạy trực tiếp như các system processes/services trên node. Sau đó kubelet sẽ khởi động và quản lý các pods tương ứng trên node đó. Với control plane node, kubelet thường sẽ khởi động các control plane components dưới dạng static pods.
+Use etcd
+K8s etcd là key-value store dùng để lưu trữ và get các persistent data trên các node như: cluster state, metadata, manafiest of resources.
+Etcd có thể triển khai một lúc nhiều instances. Vì vậy để decoupled với các components và giữ tính nhất quán dữ liệu, các components get/update data trong etcd gián tiếp thông qua API server. Áp dụng optimistic locking và validation để đảm bảo tính nhất quán data trong etcd. RAFT consensus algorithm được sử dụng để đảm bảo tính nhất quán, thuật toán yêu cầu major voting trạng thái cuối cùng của etcd. Với RAFT được sử dụng, số lượng instances etdc nên là số lẻ.
+etdc version 2 lưu keys theo dạng phân cấp, keys cha sẽ chứa các key con… tương tự một fs. etdc ver3 sử dụng slash trong key để mô phỏng sự phân cấp (vẫn là chuỗi string). ver2 hoặc ver3 đều có thể sử dụng
+etcdctl ls [key] de in cac key co prefix la [key] giong nhu get thu muc con
+etcdctl get [key] de lay value cua key.
+​
+Use API Server
+API server đóng vai trò như người điều phối communication giữa các components với nhau và nhận request CRUD resources từ clients. 
+Các state objects được update vào etcd đều gián tiếp qua api server. API server implememt optimistic locking và validation trước khi store data trong etcd giúp data đạt được consistency. 
+
+Khi clients gửi request CRUD resources metadata lên API server, request sẽ đi qua các authen plugins, authorization plugins, admission control và cuối cùng là validation trước khi được lưu xuống etcd. 
+Authentication plugin: các plugin xác thực, request pass through plugins khi có ít nhất một authen plugin đồng ý
+Authorization pluging: flow tương tự authen tuy nhiên mục đích của nó để phân quyền
+Admission control: có thể enrich request, reject request…
+Validation: validation objects.
+Watchers in K8S
+Trong k8s khi các objects thay đổi, API server cho phép mở các long-lived HTTP connection cho phép các components/clients có thể theo dõi sư thay đổi các các loại resources type realtime. 
+Ở các phiên bản mới của k8s shared watcher giúp giảm network resource (mở ít HTTP connection hơn), CPU… Thường là một watcher component và các client cần watch thì sẽ subcriber, mọi sự thay đổi của resource sau đó được public tới các sub.
+Scheduler
+Scheduler trong Kubernetes sẽ watch các Pod objects chưa được gán node (spec.nodeName chưa được set). Khi phát hiện Pod mới cần được schedule, scheduler sẽ:
+Dựa vào thông tin từ các Node objects và các constraint của Pod (resource requests, affinity/anti-affinity, taints/tolerations, topology rules, ...) để lọc ra các nodes phù hợp.
+Xếp hạng các nodes theo thuật toán scheduling đang sử dụng.
+Chọn node có điểm cao nhất để gán cho Pod.
+Sau khi chọn được node phù hợp, scheduler sẽ update Pod object thông qua API Server bằng cách set spec.nodeName.
+Kubelet trên node tương ứng watch API Server, phát hiện Pod được assign cho node của mình và bắt đầu triển khai Pod thông qua container runtime.
+Kubernetes cho phép chạy nhiều scheduler instances. Khi define Pod manifest có thể chỉ định scheduler thông qua:
+spec:
+  schedulerName: my-scheduler
+​
+Scheduler chỉ xử lý các Pod có schedulerName phù hợp với tên scheduler của nó.
+Control Manager
+Là một component đảm bảo status thực tế của cluster đúng như mong muốn. Nó quản lí các controllers, mỗi controller thực hiện một số công việc thường liên quan tới một resource type cụ thể. Mỗi controller chạy trên một tiến trình độc lập, do đó có thể dễ dàng thay đổi các custom controller.
+Controllers thực hiện các vòng lặp, so sánh status thực tế và mong muốn để thực hiện các thay đổi phù hợp. Nó cũng sử dụng cơ chế watch để nhận thông báo về sự thay đổi của resources nó đang quản lí để thực hiện thay đổi kịp thời. Tuy nhiên để đảm bảo perf cao, controllers loop thường sử dụng local cache để kiểm tra status, watch và list được thực hiện bởi Informer/Shared Informer.
+Replication Manager: là controller watch ReplicationController resources và Pods resources, thực hiện các vòng lặp nhằm đảm bảo đủ số lượng pods (dựa vào label selector). Nếu số lượng pods lớn hơn mức mong muốn, tạo request delete cho API server, ngược lại nếu số lượng pods ít hơn mức mong muốn nó sẽ request API Server tạo thêm Pod instances. 
+
+ReplicaSet, DaemonSet, Job controller: Tương tự với Replication Manager, watch resources, post Pod definitions khi pods running không đủ số lượng
+Deployment controller: Đảm bảo trạng thái thực tế của Deployment objects đúng như mong muốn, mỗi khi Pods template thay đổi thì controller sẽ post new ReplicaSet resources tới API Server, sau đó thực hiện scaling pods trên old/new replica set dựa trên stategy được define trong Deployment manifest.
+StatefulSet controller: Tương tự như ReplicaSet controller, tuy nhiên nó cũng tạo chịu trách nhiệm tạo và quản lí các PVC cho mỗi Pod instance
+Node controller: Quản lí các Node object, đảm bảo trạng thái chúng đồng bộ với node mà nó chạy trên. Node objects có thể bị thay đổi bởi Kubelet hoặc client request.
+Service Controller: Theo dõi và quản lí các service: LoadBalancer, NodePort…,
+Endpoints Controller: Theo dõi các Services, Pods để giúp Endpoints object giữ trạng thái đồng bộ với trạng thái của Service và Pods. Mỗi khi Service hoặc Pods (match label selector với service) thay đổi, controller sẽ update Endpoints resources dựa trên list IPs của pods valid.
+
+Namespace Controller: Quản lí namespace objects. Khi một Namespace object delete, controller cũng delete các resources trên namespace instances đó.
+PersistentVolume Controller: Giữ và quản lí các PV objects trong các ordered list (theo từng access mode) và order theo capacity từ nhỏ tới lớn. Khi PVC cần PV, controller sẽ lookup ordered list có access mode thoả mãn, lấy PV có capacity ≥ capacity request.
+Kubelet
+Là process trên các nodes, công việc đầu tiên của nó là register Node resources, chứa thông tin node mà kubelet đang chạy với API server. Kubelet cũng chịu trách nhiệm “watch” API server để xem các pods cần chạy trên node, sau đó nó sẽ báo cho container runtime chạy các container. Sau đó nó sẽ liên tục theo dõi và report với API server trạng thái, events và lượng resource tiêu thủ của các pods.
+Ngoài running các container như trên, Kubelet còn chịu trách nhiệm running các static pods, thường là các thành phần core của cluster. Static pod manifests thì được lưu ở trong local directory của node. 
+Kube-proxy
+Proxy đảm bảo clients có thể kết nối tới các service, các connection cuối cùng sẽ tới được một trong các pods backing the service.
+Proxy server sẽ config iptables rules, iptables (quản lí Linux kernel’s packet filtering features) rules đóng vai trò như điều hướng trong userspace proxy mode. Nó sẽ lắng nghe connection tới các services và điều hướng tới kube-proxy, kube-proxy server chịu trách nhiệm chấp nhận kết nối, nhận packets, đọc packets, mở sockets mới tới pods…
+Với iptable proxy mode thì kube-proxy chỉ đóng vai trò là config và cập nhật iptables, mọi request tới iptables sẽ được request tới randoms pod (xử lí trong kernel thay vì userspace) do đó nó rất nhanh (không tốn context switch, tránh userspace memory copy).
+Kubernetes Add-ons
+Là các features bổ sung được thêm vào cluster dưới dạng các pods. 
+DNS server cho phép các pods tìm kiếm services theo tên hoặc các pod’s ip addresses để kết nối. Nhờ cơ chế watch thì DNS sẽ theo dõi các thay đổi trên Services và Endpoints resources để thực hiên update các DNS records.
+Ingress controller: triển khai reverse proxy, theo dõi Ingress, Service, Endpoints resource và đảm bảo config proxy server đúng với define trong các resources.
+Controllers coporate
+Các controllers, API server, kubelet kết hợp với nhau, khi một request từ client gửi lên thay đổi resources, một chuỗi sự kiện tuần tự sẽ xảy ra để tạo các objects tương ứng
+Khi tạo deployment:
+
+Các components (trừ API server) sẽ dùng cơ chế watch để theo dõi resources mà nó sẽ thao tác trên đó, thực hiện các update tương ứng. Ngoài ra mỗi khi thực hiện actions nó cũng gửi Event resources chứa thông tin liên quan đến action tương ứng. 
+Inside Pod
+Ngoài các container chứa các app đang running, trong mỗi pod còn có một container chứa các namespaces chung của pods. Các app containers khi chạy sẽ tham chiếu tới các namespaces này. Container chứa namespaces gọi là infrastructure container và có life time gắn liền với life time của pod.
+Khi app container die thì pod sẽ tạo lại và sử dụng các namespace trong infrastructure. Tuy nhiên khi infrastructure container die, kubelet tạo lại nó và tất cả app containers.
+Pod networking
+Các pod giao tiếp với nhau thông qua pod IP, là private IP nội bộ trong cluster. Các PodIP giúp các pods biết được địa chỉ của nhau, kết nối trực tiếp dễ dàng và có thể dự đoán trước, không qua NAT.
+Trước khi pod infrastructure container được tạo, một virtual Ethernet interface pair sẽ tạo một đầu tên vethxxx đưa vào host’s network namespace và gắn vào một network bridge (virtual switch), ethx là đầu còn lại được đưa vào infrastructure container net work namespace và có địa chỉ IP thuộc dải IP của bridge.  CNI plugin giúp thực hiện tự động các công việc này.
+Các container thuộc về các pods trên cùng nodes được gắn vào cùng network bridge vì vậy để kết nối hai containers, request đầu tiên được gửi từ eth container A tới veth tương ứng, thông qua bridge request tới được veth của container B và được truyền vào eth của B.
+Các container nằm trên các pods khác nodes cần kết nối cùng network switch (mạng nội bộ) hoặc cần config rule router phức tạp, vì Pod ips là các private IP, không có thật trên network → không thể thực hiện IP routing. SDN plugin được sử dụng, cho phép kết nối các pods như chúng trên cùng network switch.
+Service Implement 
+Service là một object được gắn với một virtual IP (ClusterIP), dùng để truy cập tới các Pods backing Service. Đây là virtual IP vì bản thân IP này không được assign cho bất kỳ network interface nào và không tồn tại như một host/network endpoint thật. Nó chỉ được sử dụng như một địa chỉ logic để match các iptables/ipvs/eBPF rules do kube-proxy tạo ra.
+Kube-proxy watch:
+Services
+EndpointSlices/Endpoints (danh sách backing Pods)
+sau đó cấu hình iptables (hoặc IPVS/eBPF tùy mode).
+Khi một Pod gửi request tới Service:
+Pod -> Service IP
+​
+packet sẽ đi từ Pod network namespace qua veth pair vào host network stack. Trong quá trình này packet đi qua netfilter/iptables hooks.
+Nếu iptables thấy destination IP + port của packet match với một Service rule:
+ClusterIP:Port
+​
+thì kube-proxy rules sẽ thực hiện DNAT:
+chọn một backend Pod (load balancing)
+overwrite destination IP (và có thể cả port)
+Ví dụ:
+10.96.0.10:80
+↓
+10.244.1.5:8080
+​
+Sau khi rewrite, packet trở thành Pod-to-Pod traffic bình thường và tiếp tục được route qua:
+Linux bridge
+overlay/native routing
+physical network (nếu khác node)
+để tới Pod đích.
+</details>
+

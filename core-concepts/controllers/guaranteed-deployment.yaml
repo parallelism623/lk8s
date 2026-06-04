@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guaranteed-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: guaranteed-app
+  template:
+    metadata:
+      labels:
+        app: guaranteed-app
+    spec:
+      containers:
+        - name: guaranteed-container
+          image: luksa/kubia:v1
+          resources:
+            requests:
+              cpu: "100m"

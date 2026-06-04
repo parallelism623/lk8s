@@ -6,6 +6,6 @@ spec:
  storageClassName: managed-csi-retain 
  resources:
   requests:
-    storage: 100Mi
+    storage: 1Mi
  accessModes:
  - ReadWriteOnce

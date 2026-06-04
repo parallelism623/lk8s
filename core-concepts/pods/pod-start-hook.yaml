@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-start-hook
+spec:
+  containers:
+    - name: main-container
+      image: luksa/kubia
+      lifecycle:
+        postStart:
+          exec:
+            command: ["/bin/sh", "-c", "echo Hello from the postStart hook! && sleep 5; exit 15"]

@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: kubia-replicationcontroller-v1
+spec:
+  replicas: 3
+  template:
+    metadata:
+      name: kubia
+      labels:
+        app: kubia
+    spec:
+      imagePullSecrets:
+      - name: anhhieu623-dockerhub-secret
+      containers:
+      - name: kubia
+        image: anhhieu623/kubia:v1
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8080
+          initialDelaySeconds: 10
