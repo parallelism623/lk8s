@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: quote-poststart-fail-norestart
+spec:
+  restartPolicy: Never
+  containers:
+  - name: nginx
+    image: nginx:12132
+    ports:
+    - name: http
+      containerPort: 80
